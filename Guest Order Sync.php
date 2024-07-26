@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Guest Order Sync
- * Plugin URI: https://github.com/clonerdev/WooCommerce-Guest-Order-Sync-
+ * Plugin URI: https://github.com/clonerdev/WooCommerce-Guest-Order-Sync
  * Description: Sync guest orders with user profiles based on phone number. Supports Iranian phone numbers.
  * Version: 1.7.1
  * Author: Ali Karimi | Nedaye Web
