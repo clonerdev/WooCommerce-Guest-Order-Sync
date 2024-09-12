@@ -2,12 +2,13 @@
 /**
  * Plugin Name: Guest Order Sync
  * Plugin URI: https://github.com/clonerdev/WooCommerce-Guest-Order-Sync
- * Description: Sync guest orders with user profiles based on phone number. Supports Iranian phone numbers.
- * Version: 1.7.1
+ * Description: Sync guest orders with user profiles based on phone number. Supports Iranian phone numbers and multiple stores. Optimized for sites with or without CDN and caching, and compatible with PHP 8.x.
+ * Version: 1.8
  * Author: Ali Karimi | Nedaye Web
  * Author URI: https://nedayeweb.ir
  * WC requires at least: 6.4
  * Requires PHP: 7.4
+ * Tested up to: 6.6.2
  * License: GPL-2.0+
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  */
@@ -40,6 +41,21 @@ function gos_validate_and_sanitize_phone_number($phone) {
     return $normalized_phone;
 }
 
+// Function to handle caching for sites with or without CDN
+function gos_handle_caching($cache_key, $callback) {
+    // Check if cache exists
+    $cached_data = get_transient($cache_key);
+
+    // If cache does not exist, run the callback and cache the result
+    if ($cached_data === false) {
+        $data = call_user_func($callback);
+        set_transient($cache_key, $data, 12 * HOUR_IN_SECONDS); // Cache data for 12 hours
+        return $data;
+    }
+
+    return $cached_data;
+}
+
 // Sync guest orders with user profiles based on phone number
 function gos_sync_guest_orders_with_profile($order_id) {
     if (!current_user_can('edit_shop_orders')) {
@@ -63,11 +79,9 @@ function gos_sync_guest_orders_with_profile($order_id) {
         return;
     }
 
-    // Use transient to cache the result of user query
+    // Cache user lookup results for better performance on sites with CDN or caching
     $cache_key = 'gos_user_' . $normalized_phone;
-    $user_id = get_transient($cache_key);
-
-    if ($user_id === false) {
+    $user_id = gos_handle_caching($cache_key, function() use ($normalized_phone) {
         // Check if the phone number matches an existing user's phone number
         $users = get_users(array(
             'meta_query' => array(
@@ -86,27 +100,17 @@ function gos_sync_guest_orders_with_profile($order_id) {
             'number' => 1
         ));
 
-        if (!empty($users)) {
-            $user = $users[0];
-            $user_id = $user->ID;
-            set_transient($cache_key, $user_id, 12 * HOUR_IN_SECONDS); // Cache the result for 12 hours
-        } else {
-            $user_id = 0;
-            set_transient($cache_key, $user_id, 12 * HOUR_IN_SECONDS); // Cache the result for 12 hours
-        }
-    }
-
-    $login_status_message = is_user_logged_in() ? 'مشتری وارد حساب کاربری خود شده و سفارش را ثبت کرده است.' : 'مشتری بدون ورود به حساب کاربری، سفارش را ثبت کرده است.';
+        return !empty($users) ? $users[0]->ID : 0;
+    });
 
     if ($user_id > 0) {
         $order->set_customer_id($user_id);
         $order->save();
-        $order->add_order_note('سفارش با پروفایل همگام‌سازی شد (کاربر قبلاً ثبت‌نام کرده است). ' . $login_status_message);
+        $order->add_order_note('سفارش با پروفایل همگام‌سازی شد (کاربر قبلاً ثبت‌نام کرده است).');
     } else {
-        // If no matching user is found, save the normalized phone number for future reference
         $order->update_meta_data('_guest_phone', $normalized_phone);
         $order->save();
-        $order->add_order_note('سفارش به عنوان سفارش مهمان ذخیره شد. ' . $login_status_message);
+        $order->add_order_note('سفارش به عنوان سفارش مهمان ذخیره شد.');
     }
 }
 add_action('woocommerce_checkout_order_processed', 'gos_sync_guest_orders_with_profile', 10, 1);
@@ -180,12 +184,9 @@ function gos_sync_guest_orders_on_login($user_login, $user) {
         return;
     }
 
-    // Use transient to cache the result of order query
+    // Cache orders lookup for better performance on sites with CDN or caching
     $cache_key = 'gos_orders_' . $normalized_phone;
-    $orders = get_transient($cache_key);
-
-    if ($orders === false) {
-        // Find all orders that were placed with the guest phone number
+    $orders = gos_handle_caching($cache_key, function() use ($normalized_phone) {
         $args = array(
             'limit' => -1,
             'status' => 'any',
@@ -198,9 +199,8 @@ function gos_sync_guest_orders_on_login($user_login, $user) {
             )
         );
 
-        $orders = wc_get_orders($args);
-        set_transient($cache_key, $orders, 12 * HOUR_IN_SECONDS); // Cache the result for 12 hours
-    }
+        return wc_get_orders($args);
+    });
 
     // Link the found orders to the logged-in user
     foreach ($orders as $order) {
@@ -211,5 +211,3 @@ function gos_sync_guest_orders_on_login($user_login, $user) {
     }
 }
 add_action('wp_login', 'gos_sync_guest_orders_on_login', 10, 2);
-
-?>
